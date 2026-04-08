@@ -213,15 +213,22 @@ function createGame24Module(deps) {
     ctx.lineWidth = 2
     roundRectPath(x, y, w, h, 16)
     ctx.stroke()
-    // ctx.fillStyle = '#fff'
-    // ctx.textAlign = 'left'
-    // ctx.textBaseline = 'middle'
-    // ctx.font = '600 18px monospace'
-    // const text = buildExprDisplay() || '点数字 + 运算符，全部用完后点 ='
-    // ctx.fillText(text, x + 12, y + h / 2)
+    
+    // 显示当前算式
+    ctx.fillStyle = '#fff'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'middle'
+    ctx.font = '700 20px monospace'
+    const text = buildExprDisplay() 
+    const emptyText = !buildExprDisplay()
+    if (emptyText) {
+      ctx.fillStyle = 'rgba(255,255,255,0.5)'
+      ctx.font = '600 14px sans-serif'
+    }
+    ctx.fillText(text, x + 12, y + h / 2)
 
     // 清空算式按钮（不换题，只清当前输入）
-    const cw = 92
+    const cw = 72
     const ch = 34
     const cx = x + w - cw - 10
     const cy = y + (h - ch) / 2

@@ -2,6 +2,7 @@ const poems = require('../data/poems')
 
 const STORAGE_SCORE = 'poetryScore'
 const STORAGE_LEADER = 'poetryLeaderboard'
+const STORAGE_PROGRESS = 'poetryProgress' // 保存游戏进度
 
 function createPoetryModule(deps) {
   const { ctx, state, colors, roundRectPath, drawTopBackButton, pointInRect, rankService } = deps
@@ -10,6 +11,7 @@ function createPoetryModule(deps) {
     name: 'poetry',
     state: {
       poemIndex: 0,
+      completedLevels: [], // 已完成的关卡列表
       target: '',
       title: '',
       author: '',
@@ -34,8 +36,20 @@ function createPoetryModule(deps) {
     try {
       const s = wx.getStorageSync(STORAGE_SCORE)
       if (typeof s === 'number') mod.state.score = s
+      
       const lb = wx.getStorageSync(STORAGE_LEADER)
       if (Array.isArray(lb)) mod.state.leaderboard = lb
+      
+      // 加载进度
+      const progress = wx.getStorageSync(STORAGE_PROGRESS)
+      if (progress) {
+        if (typeof progress.poemIndex === 'number') {
+          mod.state.poemIndex = progress.poemIndex
+        }
+        if (Array.isArray(progress.completedLevels)) {
+          mod.state.completedLevels = progress.completedLevels
+        }
+      }
     } catch (e) {}
   }
 
@@ -43,6 +57,11 @@ function createPoetryModule(deps) {
     try {
       wx.setStorageSync(STORAGE_SCORE, mod.state.score)
       wx.setStorageSync(STORAGE_LEADER, mod.state.leaderboard)
+      // 保存进度
+      wx.setStorageSync(STORAGE_PROGRESS, {
+        poemIndex: mod.state.poemIndex,
+        completedLevels: mod.state.completedLevels,
+      })
     } catch (e) {}
   }
 
@@ -119,6 +138,16 @@ function createPoetryModule(deps) {
     mod.state.toast = null
     mod.state.poolRects = []
     mod.state.bottomRects = []
+    
+    // 初始化安全区域（刘海屏适配）
+    if (!mod.state.safeTop) {
+      try {
+        const sys = wx.getSystemInfoSync()
+        mod.state.safeTop = sys.safeArea ? sys.safeArea.top : (sys.statusBarHeight || 0) + 10
+      } catch (e) {
+        mod.state.safeTop = 44 // 默认值
+      }
+    }
   }
 
   function syncServerRank() {
@@ -129,8 +158,14 @@ function createPoetryModule(deps) {
   }
 
   function nextPoem() {
-    mod.state.poemIndex = (mod.state.poemIndex + 1) % poems.length
-    startRound()
+    // 关卡不循环，到最后一首后停止
+    if (mod.state.poemIndex < poems.length - 1) {
+      mod.state.poemIndex++
+      saveStorage()
+      startRound()
+    } else {
+      showToast('已经是最后一关了！', 800)
+    }
   }
 
   function checkWin() {
@@ -138,11 +173,18 @@ function createPoetryModule(deps) {
     if (built.length !== mod.state.target.length) return
     if (built === mod.state.target) {
       mod.state.score += 1
+      
+      // 记录已完成的关卡
+      if (!mod.state.completedLevels.includes(mod.state.poemIndex)) {
+        mod.state.completedLevels.push(mod.state.poemIndex)
+      }
+      saveStorage()
+      
       const entry = { title: mod.state.title, score: 1, ts: Date.now() }
       mod.state.leaderboard.push(entry)
       mod.state.leaderboard.sort((a, b) => b.ts - a.ts)
       mod.state.leaderboard = mod.state.leaderboard.slice(0, 30)
-      saveStorage()
+      
       mod.state.modal = { mode: 'win' }
       if (rankService) {
         rankService.reportPass({ moduleKey: 'poetry', level: mod.state.score, score: mod.state.score }).then((ret) => {
@@ -157,7 +199,7 @@ function createPoetryModule(deps) {
   function layoutPool() {
     mod.state.poolRects = []
     const pad = 12
-    const topY = 126
+    const topY = mod.state.safeTop + 160 // 使用安全区域，增加间距
     const poolH = Math.min(220, state.h * 0.32)
     const x0 = pad
     const w = state.w - pad * 2
@@ -221,19 +263,34 @@ function createPoetryModule(deps) {
   }
 
   function drawHeader() {
+    const safeTop = mod.state.safeTop
+    const startY = safeTop + 10
+    
     ctx.fillStyle = '#fff'
     ctx.textAlign = 'center'
     ctx.font = '900 26px sans-serif'
-    ctx.fillText('我爱背唐诗', state.w / 2, 70)
+    ctx.fillText('我爱背唐诗', state.w / 2, startY + 36)
+
+    // 显示进度信息
+    const currentLevel = mod.state.poemIndex + 1
+    const totalLevels = poems.length
+    const completedCount = mod.state.completedLevels.length
+
     ctx.fillStyle = 'rgba(255,255,255,0.9)'
     ctx.font = '600 13px sans-serif'
-    ctx.fillText(`得分：${mod.state.score}`, state.w / 2, 96)
+    ctx.fillText(`进度：第 ${currentLevel}/${totalLevels} 关 | 已完成：${completedCount} 关`, state.w / 2, startY + 62)
+
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
     ctx.font = '600 12px sans-serif'
-    ctx.fillText(mod.state.rankText, state.w / 2, 112)
+    ctx.fillText(`累计得分：${mod.state.score}`, state.w / 2, startY + 82)
+
+    ctx.font = '600 11px sans-serif'
+    ctx.fillText(mod.state.rankText, state.w / 2, startY + 100)
+
     if (mod.state.title) {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)'
-      ctx.font = '600 12px sans-serif'
-      ctx.fillText(`${mod.state.title} · ${mod.state.author}`, state.w / 2, 128)
+      ctx.fillStyle = '#ffd166'
+      ctx.font = '700 13px sans-serif'
+      ctx.fillText(`《${mod.state.title}》· ${mod.state.author}`, state.w / 2, startY + 120)
     }
   }
 
@@ -342,7 +399,7 @@ function createPoetryModule(deps) {
     ctx.fillStyle = 'rgba(0,0,0,0.55)'
     ctx.fillRect(0, 0, state.w, state.h)
     const w = state.w - 48
-    const h = 200
+    const h = 220
     const x = 24
     const y = state.h * 0.5 - h / 2
     ctx.fillStyle = 'rgba(255,255,255,0.98)'
@@ -359,8 +416,15 @@ function createPoetryModule(deps) {
     ctx.fillStyle = 'rgba(11,16,32,0.85)'
     ctx.font = '600 14px sans-serif'
     ctx.fillText(`《${mod.state.title}》拼对了！`, x + w / 2, y + 82)
+    
+    const currentLevel = mod.state.poemIndex + 1
+    const totalLevels = poems.length
+    const completedCount = mod.state.completedLevels.length
     ctx.font = '13px sans-serif'
-    ctx.fillText(`累计得分：${mod.state.score}`, x + w / 2, y + 108)
+    ctx.fillStyle = 'rgba(11,16,32,0.7)'
+    ctx.fillText(`进度：第 ${currentLevel}/${totalLevels} 关 | 已完成：${completedCount} 关`, x + w / 2, y + 106)
+    ctx.fillText(`累计得分：${mod.state.score}`, x + w / 2, y + 128)
+    
     const okW = 160
     const okH = 44
     const okX = x + (w - okW) / 2
@@ -436,7 +500,7 @@ function createPoetryModule(deps) {
 
   mod.enter = function enter() {
     loadStorage()
-    mod.state.poemIndex = 0
+    // 不再重置到第0关，保留上次进度
     startRound()
     syncServerRank()
   }
