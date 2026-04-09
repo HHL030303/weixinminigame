@@ -16,6 +16,74 @@ function applyOp(a, b, op) {
   return null
 }
 
+// 简单的表达式解析器（替代 eval，支持 + - * / 和括号）
+function evaluateExpression(expr) {
+  let pos = 0
+  const str = expr.replace(/\s/g, '') // 去除空格
+  
+  function parseExpression() {
+    let left = parseTerm()
+    while (pos < str.length) {
+      if (str[pos] === '+' || str[pos] === '-') {
+        const op = str[pos]
+        pos++
+        const right = parseTerm()
+        left = applyOp(left, right, op)
+        if (left === null) return null
+      } else {
+        break
+      }
+    }
+    return left
+  }
+  
+  function parseTerm() {
+    let left = parseFactor()
+    while (pos < str.length) {
+      if (str[pos] === '*' || str[pos] === '/') {
+        const op = str[pos]
+        pos++
+        const right = parseFactor()
+        left = applyOp(left, right, op)
+        if (left === null) return null
+      } else {
+        break
+      }
+    }
+    return left
+  }
+  
+  function parseFactor() {
+    if (pos >= str.length) return null
+    
+    // 处理括号
+    if (str[pos] === '(') {
+      pos++ // 跳过 '('
+      const result = parseExpression()
+      if (pos < str.length && str[pos] === ')') {
+        pos++ // 跳过 ')'
+      }
+      return result
+    }
+    
+    // 处理数字
+    let numStr = ''
+    while (pos < str.length && (str[pos] >= '0' && str[pos] <= '9' || str[pos] === '.')) {
+      numStr += str[pos]
+      pos++
+    }
+    
+    if (numStr.length > 0) {
+      return parseFloat(numStr)
+    }
+    
+    return null
+  }
+  
+  const result = parseExpression()
+  return result
+}
+
 function isSolvable(nums, target) {
   const memo = new Set()
   function norm(v) {
@@ -69,6 +137,7 @@ function createGame24Module(deps) {
       numbers: [],
       numberRects: [],
       exprTokens: [],
+      cursorIndex: -1, // 光标位置，-1 表示在末尾
       opButtons: [],
       score: 0,
       timer: { startTs: Date.now(), elapsed: 0 },
@@ -82,15 +151,76 @@ function createGame24Module(deps) {
     mod.state.toast = { text, until: Date.now() + 1500 }
   }
 
-  function buildExprEval() {
-    return mod.state.exprTokens.map((t) => t.value).join('')
+  // 在光标位置插入 token
+  function insertToken(token) {
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    if (cursorIdx === -1 || cursorIdx >= tokens.length) {
+      // 光标在末尾，直接追加
+      tokens.push(token)
+      mod.state.cursorIndex = tokens.length - 1
+    } else {
+      // 在光标后插入
+      tokens.splice(cursorIdx + 1, 0, token)
+      mod.state.cursorIndex = cursorIdx + 1
+    }
   }
-  function buildExprDisplay() {
-    return mod.state.exprTokens.map((t) => t.value).join(' ')
+  
+  // 获取光标后的 token（用于验证）
+  function getTokenAfterCursor() {
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    // cursorIdx = -1 表示在第一个 token 前
+    if (cursorIdx === -1) {
+      return tokens.length > 0 ? tokens[0] : null
+    }
+    
+    // cursorIdx >= tokens.length - 1 表示在末尾
+    if (cursorIdx >= tokens.length - 1) {
+      return null
+    }
+    
+    return tokens[cursorIdx + 1]
   }
+  
+  // 在光标位置插入 token
+  function insertToken(token) {
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    if (cursorIdx === -1) {
+      // 光标在开头，插入到最前面
+      tokens.unshift(token)
+      mod.state.cursorIndex = 0
+    } else if (cursorIdx >= tokens.length - 1) {
+      // 光标在末尾，追加到最后
+      tokens.push(token)
+      mod.state.cursorIndex = tokens.length - 1
+    } else {
+      // 在光标后插入
+      tokens.splice(cursorIdx + 1, 0, token)
+      mod.state.cursorIndex = cursorIdx + 1
+    }
+  }
+  
+  // 获取最后一个 token（当光标在末尾时）
   function lastToken() {
     const t = mod.state.exprTokens
     return t.length ? t[t.length - 1] : null
+  }
+
+  function buildExprEval() {
+    // 构建用于 eval 计算的表达式
+    const tokens = mod.state.exprTokens.map((t) => t.value)
+    return tokens.join('')
+  }
+  
+  function buildExprDisplay() {
+    // 构建用于显示的表达式（带空格，更易读）
+    const tokens = mod.state.exprTokens.map((t) => t.value)
+    return tokens.join(' ')
   }
   function parenBalance() {
     let b = 0
@@ -100,11 +230,31 @@ function createGame24Module(deps) {
     }
     return b
   }
+  
+  // 获取光标前的 token
+  function getTokenBeforeCursor() {
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    // cursorIdx = -1 表示在开头，前面没有 token
+    if (cursorIdx === -1) {
+      return null
+    }
+    
+    // cursorIdx 在范围内
+    if (cursorIdx >= 0 && cursorIdx < tokens.length) {
+      return tokens[cursorIdx]
+    }
+    
+    // 超出范围，返回最后一个 token
+    return tokens.length > 0 ? tokens[tokens.length - 1] : null
+  }
 
   function resetRound() {
     const nums = randomQuestion()
     mod.state.numbers = nums.map((v) => ({ id: `${Date.now()}_${v}_${Math.random()}`, value: v, used: false }))
     mod.state.exprTokens = []
+    mod.state.cursorIndex = -1 // 重置光标到末尾
     mod.state.result = null
     mod.state.modal = null
     mod.state.toast = null
@@ -213,19 +363,81 @@ function createGame24Module(deps) {
     ctx.lineWidth = 2
     roundRectPath(x, y, w, h, 16)
     ctx.stroke()
+
+    // 计算每个 token 的位置和宽度
+    const tokens = mod.state.exprTokens
+    const tokenWidths = []
+    const padding = 12
+    let totalWidth = 0
+    
+    ctx.font = '700 20px monospace'
+    for (let i = 0; i < tokens.length; i++) {
+      const width = ctx.measureText(tokens[i].value).width + 6 // 字符宽度 + 间距
+      tokenWidths.push(width)
+      totalWidth += width
+    }
+    
+    // 存储 token 的命中区域
+    mod.state.exprTokenRects = []
+    let currentX = x + padding
     
     // 显示当前算式
-    ctx.fillStyle = '#fff'
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'middle'
-    ctx.font = '700 20px monospace'
-    const text = buildExprDisplay() 
-    const emptyText = !buildExprDisplay()
+    const text = buildExprDisplay()
+    const emptyText = tokens.length === 0
+    
     if (emptyText) {
       ctx.fillStyle = 'rgba(255,255,255,0.5)'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
       ctx.font = '600 14px sans-serif'
+      ctx.fillText('点数字 + 运算符，全部用完后点 =', x + padding, y + h / 2)
+    } else {
+      ctx.fillStyle = '#fff'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.font = '700 20px monospace'
+      
+      // 绘制每个 token
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i]
+        const tokenW = tokenWidths[i]
+        
+        // 存储命中区域
+        mod.state.exprTokenRects.push({
+          index: i,
+          x: currentX,
+          y: y + 8,
+          w: tokenW,
+          h: h - 16,
+        })
+        
+        ctx.fillText(token.value, currentX, y + h / 2)
+        currentX += tokenW
+      }
+      
+      // 绘制光标（在光标位置或末尾）
+      const cursorIdx = mod.state.cursorIndex
+      let cursorX = currentX // 默认在末尾
+      
+      if (cursorIdx === -1) {
+        // 光标在开头（第一个 token 前）
+        cursorX = x + padding
+      } else if (cursorIdx >= 0 && cursorIdx < tokens.length) {
+        // 光标在某个 token 后
+        cursorX = mod.state.exprTokenRects[cursorIdx].x + mod.state.exprTokenRects[cursorIdx].w
+      }
+
+      // 闪烁光标
+      const blink = Math.floor(Date.now() / 500) % 2
+      if (blink) {
+        ctx.strokeStyle = '#ffd166'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(cursorX, y + 10)
+        ctx.lineTo(cursorX, y + h - 10)
+        ctx.stroke()
+      }
     }
-    ctx.fillText(text, x + 12, y + h / 2)
 
     // 清空算式按钮（不换题，只清当前输入）
     const cw = 72
@@ -375,7 +587,7 @@ function createGame24Module(deps) {
   function validateBeforeEqual() {
     if (!mod.state.numbers.every((n) => n.used)) return { ok: false, msg: '四个数字都要用一次' }
     if (parenBalance() !== 0) return { ok: false, msg: '括号要配对好哦' }
-    const last = lastToken()
+    const last = getTokenBeforeCursor()
     if (!last) return { ok: false, msg: '先组好算式再点等于' }
     if (last.type === 'op') return { ok: false, msg: '不能以运算符结尾' }
     if (last.type === 'paren' && last.value === '(') return { ok: false, msg: '括号里要有内容' }
@@ -383,17 +595,61 @@ function createGame24Module(deps) {
   }
 
   function canAppendNum() {
-    const last = lastToken()
-    if (!last) return true
-    if (last.type === 'op') return true
-    if (last.type === 'paren' && last.value === '(') return true
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    // 如果没有任何 token，可以插入
+    if (tokens.length === 0) return true
+    
+    // cursorIdx = -1 表示在开头
+    if (cursorIdx === -1) {
+      // 检查第一个 token
+      const first = tokens[0]
+      if (first.type === 'op') return true
+      if (first.type === 'paren' && first.value === '(') return true
+      return false
+    }
+    
+    // cursorIdx >= tokens.length - 1 表示在末尾
+    if (cursorIdx >= tokens.length - 1) {
+      const last = tokens[tokens.length - 1]
+      if (last.type === 'op') return true
+      if (last.type === 'paren' && last.value === '(') return true
+      return false
+    }
+    
+    // 光标在中间，检查光标后的 token
+    const afterCursor = tokens[cursorIdx + 1]
+    if (afterCursor.type === 'op') return true
+    if (afterCursor.type === 'paren' && afterCursor.value === '(') return true
     return false
   }
+  
   function canAppendOp() {
-    const last = lastToken()
-    if (!last) return false
-    if (last.type === 'num') return true
-    if (last.type === 'paren' && last.value === ')') return true
+    const tokens = mod.state.exprTokens
+    const cursorIdx = mod.state.cursorIndex
+    
+    // 如果没有任何 token，不能插入运算符
+    if (tokens.length === 0) return false
+    
+    // cursorIdx = -1 表示在开头
+    if (cursorIdx === -1) {
+      // 开头不能放运算符（除非是左括号，但左括号有单独的逻辑）
+      return false
+    }
+    
+    // cursorIdx >= tokens.length - 1 表示在末尾
+    if (cursorIdx >= tokens.length - 1) {
+      const last = tokens[tokens.length - 1]
+      if (last.type === 'num') return true
+      if (last.type === 'paren' && last.value === ')') return true
+      return false
+    }
+    
+    // 光标在中间，检查光标前的 token
+    const beforeCursor = tokens[cursorIdx]
+    if (beforeCursor.type === 'num') return true
+    if (beforeCursor.type === 'paren' && beforeCursor.value === ')') return true
     return false
   }
 
@@ -418,12 +674,41 @@ function createGame24Module(deps) {
     // 清空当前算式（保留当前题目和计时）
     if (mod.state.clearExprBtn && pointInRect(x, y, mod.state.clearExprBtn)) {
       mod.state.exprTokens = []
+      mod.state.cursorIndex = -1
       for (let i = 0; i < mod.state.numbers.length; i++) {
         mod.state.numbers[i].used = false
       }
       showToast('已清空当前运算')
       return true
     }
+    
+    // 检查是否点击了算式条中的 token（用于定位光标）
+    if (mod.state.exprTokenRects) {
+      for (let i = 0; i < mod.state.exprTokenRects.length; i++) {
+        const rect = mod.state.exprTokenRects[i]
+        if (pointInRect(x, y, rect)) {
+          // 点击 token，将光标定位在这个 token 前
+          // cursorIdx = i - 1 表示在第 i 个 token 前（即第 i-1 个 token 后）
+          // 如果 i = 0，cursorIdx = -1 表示在第一个 token 前
+          mod.state.cursorIndex = i - 1
+          return true
+        }
+      }
+      
+      // 检查是否点击了算式条的空白区域（在所有 token 之后）
+      const exprBarX = 16
+      const exprBarY = state.h * 0.58
+      const exprBarW = state.w - 32
+      const exprBarH = 56
+      const exprBarRect = { x: exprBarX, y: exprBarY, w: exprBarW, h: exprBarH }
+      
+      if (pointInRect(x, y, exprBarRect)) {
+        // 点击了算式条但没有点到任何 token，光标移到末尾
+        mod.state.cursorIndex = mod.state.exprTokens.length - 1
+        return true
+      }
+    }
+    
     for (let i = 0; i < mod.state.numberRects.length; i++) {
       const item = mod.state.numberRects[i]
       if (!pointInRect(x, y, item.rect)) continue
@@ -433,7 +718,7 @@ function createGame24Module(deps) {
         return true
       }
       item.num.used = true
-      mod.state.exprTokens.push({ type: 'num', value: String(item.num.value) })
+      insertToken({ type: 'num', value: String(item.num.value) })
       return true
     }
     for (let i = 0; i < mod.state.opButtons.length; i++) {
@@ -448,12 +733,29 @@ function createGame24Module(deps) {
         }
         const exprEval = buildExprEval()
         const exprDisplay = buildExprDisplay()
+        
+        // 调试信息：打印表达式
+        console.log('=== 24点计算调试 ===')
+        console.log('exprTokens:', mod.state.exprTokens)
+        console.log('exprEval:', exprEval)
+        console.log('exprDisplay:', exprDisplay)
+        
         let value
         try {
-          // eslint-disable-next-line no-eval
-          value = eval(exprEval)
+          // 使用自定义表达式解析器替代 eval
+          value = evaluateExpression(exprEval)
+          console.log('计算结果:', value)
+          
+          if (value === null || !Number.isFinite(value)) {
+            showToast('算式有误，请检查除数是否为0')
+            mod.state.exprTokens = []
+            for (let i = 0; i < mod.state.numbers.length; i++) mod.state.numbers[i].used = false
+            return true
+          }
         } catch (e) {
-          showToast('算式有误，请重试')
+          console.error('❌ 计算错误:', e.message)
+          console.error('表达式:', exprEval)
+          showToast('算式有误: ' + e.message)
           mod.state.exprTokens = []
           for (let i = 0; i < mod.state.numbers.length; i++) mod.state.numbers[i].used = false
           return true
@@ -477,28 +779,28 @@ function createGame24Module(deps) {
         return true
       }
       if (label === '(') {
-        const last = lastToken()
+        const last = getTokenBeforeCursor()
         if (!(!last || last.type === 'op' || (last.type === 'paren' && last.value === '('))) {
           showToast('左括号位置不对')
           return true
         }
-        mod.state.exprTokens.push({ type: 'paren', value: '(' })
+        insertToken({ type: 'paren', value: '(' })
         return true
       }
       if (label === ')') {
-        const last = lastToken()
+        const last = getTokenBeforeCursor()
         if (!(parenBalance() > 0 && last && (last.type === 'num' || (last.type === 'paren' && last.value === ')')))) {
           showToast('右括号位置不对')
           return true
         }
-        mod.state.exprTokens.push({ type: 'paren', value: ')' })
+        insertToken({ type: 'paren', value: ')' })
         return true
       }
       if (!canAppendOp()) {
         showToast('不能连续点运算符')
         return true
       }
-      mod.state.exprTokens.push({ type: 'op', value: label })
+      insertToken({ type: 'op', value: label })
       return true
     }
     return false
